@@ -83,6 +83,20 @@ TEST_F(FeedTrackableSignalTests, MapConnect)
     EXPECT_EQ(testString, "test1");
 }
 
+TEST_F(FeedTrackableSignalTests, MapEmptyAfterLastDisconnect)
+{
+    feed::impl::TrackableSignalMap<std::string, web::SubscriptionContextInterface, std::string>
+        signalMap;
+    EXPECT_TRUE(signalMap.empty());
+    EXPECT_TRUE(signalMap.connectTrackableSlot(sessionPtr, "first", [](auto const&) {}));
+    EXPECT_TRUE(signalMap.connectTrackableSlot(sessionPtr, "second", [](auto const&) {}));
+    EXPECT_FALSE(signalMap.empty());
+    EXPECT_TRUE(signalMap.disconnect(sessionPtr.get(), "first"));
+    EXPECT_FALSE(signalMap.empty());
+    EXPECT_TRUE(signalMap.disconnect(sessionPtr.get(), "second"));
+    EXPECT_TRUE(signalMap.empty());
+}
+
 TEST_F(FeedTrackableSignalTests, MapAutoDisconnect)
 {
     feed::impl::TrackableSignalMap<std::string, web::SubscriptionContextInterface, std::string>

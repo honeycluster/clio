@@ -182,6 +182,16 @@ TransactionFeed::pub(
     uint32_t const networkID
 )
 {
+    // Readers without transaction listeners must not synchronously fetch owner
+    // funds for every OfferCreate. This is particularly expensive without the
+    // ledger cache. Proposed streams also receive validated transactions.
+    // This does not bypass ETL cache/diff updates or the publisher's other work.
+    // Active-listener publication stalls require separate operation-level timings;
+    // a fresh RPC ledger tip does not establish delivered-stream freshness.
+    if (signal_.count() == 0 && txProposedSignal_.count() == 0 && accountSignal_.empty() &&
+        accountProposedSignal_.empty() && bookSignal_.empty())
+        return;
+
     auto [tx, meta] = rpc::deserializeTxPlusMeta(txMeta, lgrInfo.seq);
 
     std::optional<xrpl::STAmount> ownerFunds;

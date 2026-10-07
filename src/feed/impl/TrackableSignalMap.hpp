@@ -35,6 +35,13 @@ class TrackableSignalMap {
     util::Mutex<SignalsMap> signalsMap_;
 
 public:
+    /** @brief Whether no keys have registered subscribers. Thread-safe. */
+    [[nodiscard]] bool
+    empty() const
+    {
+        return signalsMap_.template lock<std::scoped_lock>()->empty();
+    }
+
     /**
      * @brief Connect a slot to the signal, the slot will be called when the signal is emitted and
      * trackable is still alive.

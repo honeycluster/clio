@@ -835,6 +835,33 @@ TEST_F(FeedTransactionTest, SubRepeat)
     EXPECT_EQ(testFeedPtr->bookSubCount(), 0);
 }
 
+TEST_F(FeedTransactionTest, NoSubscribersSkipsOwnerFundsWithoutCache)
+{
+    backend_->cache().setDisabled();
+    auto const ledgerHeader = createLedgerHeader(kLedgerHash, 33);
+    auto transaction = TransactionAndMetadata();
+    auto const object =
+        createCreateOfferTransactionObject(kAccount1, 1, 32, kCurrency, kIssuer, 1, 3);
+    transaction.transaction = object.getSerializer().peekData();
+    transaction.ledgerSequence = 32;
+    xrpl::STArray const nodes{0};
+    xrpl::STObject metadata(xrpl::sfTransactionMetaData);
+    metadata.setFieldArray(xrpl::sfAffectedNodes, nodes);
+    metadata.setFieldU8(xrpl::sfTransactionResult, xrpl::tesSUCCESS);
+    metadata.setFieldU32(xrpl::sfTransactionIndex, 22);
+    transaction.metadata = metadata.getSerializer().peekData();
+
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(0);
+    EXPECT_CALL(*mockSessionPtr, send).Times(0);
+    testFeedPtr->pub(transaction, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
+
+    // Explicit subscribe/unsubscribe must restore the same no-listener fast path.
+    EXPECT_CALL(*mockSessionPtr, onDisconnect);
+    testFeedPtr->sub(sessionPtr);
+    testFeedPtr->unsub(sessionPtr);
+    testFeedPtr->pub(transaction, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
+}
+
 TEST_F(FeedTransactionTest, PubTransactionWithOwnerFund)
 {
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
