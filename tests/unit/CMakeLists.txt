@@ -1,5 +1,16 @@
 add_executable(clio_tests)
 
+# GCC 15's scalar replacement pass diagnoses an uninitialized shared_ptr
+# temporary in ChannelSpawnTest.MultipleSendersOneReceiver. The unchanged
+# test compiles with this pass disabled. Keep -Werror and all assertions;
+# scope the workaround to this test translation unit, never server code.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+    set_property(SOURCE util/ChannelTests.cpp APPEND PROPERTY
+                 COMPILE_OPTIONS -fno-tree-sra)
+endif()
+
 target_sources(
     clio_tests
     PRIVATE
