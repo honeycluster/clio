@@ -320,6 +320,13 @@ public:
         xrpl::LedgerHeader const& lgrInfo
     ) final;
 
+    /** @brief Prepare a bounded window concurrently and dispatch in input order. */
+    void
+    pubTransactions(
+        std::span<data::TransactionAndMetadata const> transactions,
+        xrpl::LedgerHeader const& lgrInfo
+    ) final;
+
     /**
      * @brief Get the number of subscribers.
      *

@@ -195,6 +195,15 @@ SubscriptionManager::pubTransaction(
     transactionFeed_.pub(txMeta, lgrInfo, backend_, amendmentCenter_, networkID_);
 }
 
+void
+SubscriptionManager::pubTransactions(
+    std::span<data::TransactionAndMetadata const> transactions,
+    xrpl::LedgerHeader const& lgrInfo
+)
+{
+    transactionFeed_.pubBatch(transactions, lgrInfo, backend_, amendmentCenter_, networkID_);
+}
+
 boost::json::object
 SubscriptionManager::report() const
 {

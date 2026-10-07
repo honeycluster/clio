@@ -13,6 +13,7 @@
 #include <xrpl/protocol/LedgerHeader.h>
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -227,6 +228,17 @@ public:
         data::TransactionAndMetadata const& txMeta,
         xrpl::LedgerHeader const& lgrInfo
     ) = 0;
+
+    /** @brief Publish a ledger's transactions in input order; default to serial forwarding. */
+    virtual void
+    pubTransactions(
+        std::span<data::TransactionAndMetadata const> transactions,
+        xrpl::LedgerHeader const& lgrInfo
+    )
+    {
+        for (auto const& transaction : transactions)
+            pubTransaction(transaction, lgrInfo);
+    }
 
     /**
      * @brief Get the number of subscribers.

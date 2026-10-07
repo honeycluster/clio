@@ -17,6 +17,6 @@ done
 cmake -S "$root" -B "$build_dir" -Dtests=ON -Dintegration_tests=OFF
 cmake --build "$build_dir" --parallel "$jobs" --target clio_server clio_tests
 "$build_dir/clio_tests" \
-    --gtest_filter='FeedTransactionTest.*:FeedTrackableSignalTests.*:*ChannelSpawnTest*:*ChannelCallbackTest*:ClusterBackendTest.*' \
+    --gtest_filter='*FeedTransactionTest.*:FeedTransactionBatchTest.*:FeedTrackableSignalTests.*:*ChannelSpawnTest*:*ChannelCallbackTest*:ClusterBackendTest.*' \
     --gtest_repeat="$repeats"
 "$build_dir/clio_tests" --gtest_repeat="$repeats"

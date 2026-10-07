@@ -28,12 +28,16 @@
 #include <xrpl/protocol/TxFormats.h>
 #include <xrpl/protocol/jss.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace feed::impl {
 
@@ -188,10 +192,73 @@ TransactionFeed::pub(
     // This does not bypass ETL cache/diff updates or the publisher's other work.
     // Active-listener publication stalls require separate operation-level timings;
     // a fresh RPC ledger tip does not establish delivered-stream freshness.
-    if (signal_.count() == 0 && txProposedSignal_.count() == 0 && accountSignal_.empty() &&
-        accountProposedSignal_.empty() && bookSignal_.empty())
+    if (!hasSubscribers())
         return;
 
+    auto const prepared = data::synchronous([&](auto yield) {
+        return prepare(txMeta, lgrInfo, backend, amendmentCenter, yield);
+    });
+    publishPrepared(txMeta, lgrInfo, prepared, networkID);
+}
+
+bool
+TransactionFeed::hasSubscribers() const
+{
+    return signal_.count() != 0 || txProposedSignal_.count() != 0 || !accountSignal_.empty() ||
+        !accountProposedSignal_.empty() || !bookSignal_.empty();
+}
+
+void
+TransactionFeed::pubBatch(
+    std::span<data::TransactionAndMetadata const> transactions,
+    xrpl::LedgerHeader const& lgrInfo,
+    std::shared_ptr<data::BackendInterface const> const& backend,
+    std::shared_ptr<data::AmendmentCenterInterface const> const& amendmentCenter,
+    uint32_t const networkID
+)
+{
+    // A fixed window bounds coroutine stacks, prepared metadata and in-flight DB
+    // requests. All preparation finishes before ordered dispatch of that window.
+    constexpr std::size_t kConcurrency = 8;
+    for (std::size_t begin = 0; begin < transactions.size(); begin += kConcurrency) {
+        if (!hasSubscribers())
+            return;
+        auto const chunk = transactions.subspan(
+            begin, std::min(kConcurrency, transactions.size() - begin)
+        );
+        std::vector<std::optional<PreparedTransaction>> prepared(chunk.size());
+        std::vector<std::exception_ptr> errors(chunk.size());
+        boost::asio::io_context ctx;
+        for (std::size_t i = 0; i < chunk.size(); ++i) {
+            boost::asio::spawn(
+                boost::asio::make_strand(ctx),
+                [&, i, guard = boost::asio::make_work_guard(ctx)](auto yield) {
+                    prepared[i] = prepare(chunk[i], lgrInfo, backend, amendmentCenter, yield);
+                },
+                // Collect failures rather than unwinding run() while other reads
+                // still reference this window. Asio handles coroutine unwinding.
+                [&, i](std::exception_ptr error) { errors[i] = error; }
+            );
+        }
+        ctx.run();
+        for (std::size_t i = 0; i < chunk.size(); ++i) {
+            // Preserve the successful prefix and propagate the earliest input error.
+            if (errors[i])
+                std::rethrow_exception(errors[i]);
+            publishPrepared(chunk[i], lgrInfo, prepared[i].value(), networkID);
+        }
+    }
+}
+
+TransactionFeed::PreparedTransaction
+TransactionFeed::prepare(
+    data::TransactionAndMetadata const& txMeta,
+    xrpl::LedgerHeader const& lgrInfo,
+    std::shared_ptr<data::BackendInterface const> const& backend,
+    std::shared_ptr<data::AmendmentCenterInterface const> const& amendmentCenter,
+    boost::asio::yield_context yield
+)
+{
     auto [tx, meta] = rpc::deserializeTxPlusMeta(txMeta, lgrInfo.seq);
 
     std::optional<xrpl::STAmount> ownerFunds;
@@ -200,17 +267,29 @@ TransactionFeed::pub(
         auto const account = tx->getAccountID(xrpl::sfAccount);
         auto const amount = tx->getFieldAmount(xrpl::sfTakerGets);
         if (account != amount.get<xrpl::Issue>().account) {
-            auto fetchFundsSynchronous = [&]() {
-                data::synchronous([&](boost::asio::yield_context yield) {
-                    ownerFunds = rpc::accountFunds(
+            ownerFunds = data::retryOnTimeout(
+                [&]() {
+                    return rpc::accountFunds(
                         *backend, *amendmentCenter, lgrInfo.seq, amount, account, yield
                     );
-                });
-            };
-            data::retryOnTimeout(fetchFundsSynchronous);
+                },
+                yield
+            );
         }
     }
 
+    return {std::move(tx), std::move(meta), std::move(ownerFunds)};
+}
+
+void
+TransactionFeed::publishPrepared(
+    data::TransactionAndMetadata const& txMeta,
+    xrpl::LedgerHeader const& lgrInfo,
+    PreparedTransaction const& prepared,
+    uint32_t const networkID
+)
+{
+    auto const& [tx, meta, ownerFunds] = prepared;
     auto const genJsonByVersion = [&, tx, meta](std::uint32_t version) {
         boost::json::object pubObj;
         auto const txKey = version < 2u ? JS(transaction) : JS(tx_json);

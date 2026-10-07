@@ -18,16 +18,27 @@
 #include <xrpl/protocol/AccountID.h>
 #include <xrpl/protocol/Book.h>
 #include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/STAmount.h>
+#include <xrpl/protocol/STTx.h>
+#include <xrpl/protocol/TxMeta.h>
 
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <unordered_set>
 
 namespace feed::impl {
 
 class TransactionFeed {
+    struct PreparedTransaction {
+        std::shared_ptr<xrpl::STTx const> tx;
+        std::shared_ptr<xrpl::TxMeta const> meta;
+        std::optional<xrpl::STAmount> ownerFunds;
+    };
+
     // Hold two versions of transaction messages
     struct AllVersionsMsgsType {
         std::string v1;
@@ -180,6 +191,20 @@ public:
         uint32_t networkID);
 
     /**
+     * @brief Prepare at most eight transactions concurrently, then dispatch in input order.
+     * @note Input must already be sorted by TransactionIndex. Preparation uses cooperative
+     * coroutines on the calling thread, not additional threads or an unbounded task queue.
+     */
+    void
+    pubBatch(
+        std::span<data::TransactionAndMetadata const> transactions,
+        xrpl::LedgerHeader const& lgrInfo,
+        std::shared_ptr<data::BackendInterface const> const& backend,
+        std::shared_ptr<data::AmendmentCenterInterface const> const& amendmentCenter,
+        uint32_t networkID
+    );
+
+    /**
      * @brief Get the number of subscribers of the transaction feed.
      */
     std::uint64_t
@@ -198,6 +223,26 @@ public:
     bookSubCount() const;
 
 private:
+    [[nodiscard]] bool
+    hasSubscribers() const;
+
+    static PreparedTransaction
+    prepare(
+        data::TransactionAndMetadata const& txMeta,
+        xrpl::LedgerHeader const& lgrInfo,
+        std::shared_ptr<data::BackendInterface const> const& backend,
+        std::shared_ptr<data::AmendmentCenterInterface const> const& amendmentCenter,
+        boost::asio::yield_context yield
+    );
+
+    void
+    publishPrepared(
+        data::TransactionAndMetadata const& txMeta,
+        xrpl::LedgerHeader const& lgrInfo,
+        PreparedTransaction const& prepared,
+        uint32_t networkID
+    );
+
     void
     unsubInternal(SubscriberPtr subscriber);
 

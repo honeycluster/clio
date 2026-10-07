@@ -9,6 +9,8 @@
 #include "util/prometheus/Gauge.hpp"
 #include "web/SubscriptionContextInterface.hpp"
 
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <xrpl/basics/base_uint.h>
@@ -22,6 +24,8 @@
 #include <xrpl/protocol/STObject.h>
 #include <xrpl/protocol/TER.h>
 
+#include <algorithm>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -210,9 +214,32 @@ constexpr auto kNftMintTranV1 =
 using namespace feed::impl;
 using namespace util::prometheus;
 
-using FeedTransactionTest = FeedBaseTest<TransactionFeed>;
+// Run the same payload/subscription assertions through serial and batched preparation.
+struct SelectableTransactionFeed : TransactionFeed {
+    using TransactionFeed::TransactionFeed;
 
-TEST_F(FeedTransactionTest, SubTransactionV1)
+    void
+    pub(
+        TransactionAndMetadata const& transaction,
+        xrpl::LedgerHeader const& ledger,
+        std::shared_ptr<BackendInterface const> const& backend,
+        std::shared_ptr<AmendmentCenterInterface const> const& amendments,
+        uint32_t network
+    )
+    {
+        if (testing::WithParamInterface<bool>::GetParam())
+            pubBatch(std::span{&transaction, 1}, ledger, backend, amendments, network);
+        else
+            TransactionFeed::pub(transaction, ledger, backend, amendments, network);
+    }
+};
+
+struct FeedTransactionTest : FeedBaseTest<SelectableTransactionFeed>,
+                             testing::WithParamInterface<bool> {};
+
+INSTANTIATE_TEST_SUITE_P(SerialAndBatch, FeedTransactionTest, testing::Bool());
+
+TEST_P(FeedTransactionTest, SubTransactionV1)
 {
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
     testFeedPtr->sub(sessionPtr);
@@ -236,7 +263,7 @@ TEST_F(FeedTransactionTest, SubTransactionV1)
     EXPECT_EQ(testFeedPtr->transactionSubCount(), 0);
 }
 
-TEST_F(FeedTransactionTest, SubTransactionForProposedTx)
+TEST_P(FeedTransactionTest, SubTransactionForProposedTx)
 {
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
     testFeedPtr->subProposed(sessionPtr);
@@ -259,7 +286,7 @@ TEST_F(FeedTransactionTest, SubTransactionForProposedTx)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubTransactionV2)
+TEST_P(FeedTransactionTest, SubTransactionV2)
 {
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
     testFeedPtr->sub(sessionPtr);
@@ -284,7 +311,7 @@ TEST_F(FeedTransactionTest, SubTransactionV2)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubAccountV1)
+TEST_P(FeedTransactionTest, SubAccountV1)
 {
     auto const account = getAccountIdWithString(kAccount1);
 
@@ -312,7 +339,7 @@ TEST_F(FeedTransactionTest, SubAccountV1)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubForProposedAccount)
+TEST_P(FeedTransactionTest, SubForProposedAccount)
 {
     auto const account = getAccountIdWithString(kAccount1);
 
@@ -338,7 +365,7 @@ TEST_F(FeedTransactionTest, SubForProposedAccount)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubAccountV2)
+TEST_P(FeedTransactionTest, SubAccountV2)
 {
     auto const account = getAccountIdWithString(kAccount1);
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
@@ -365,7 +392,7 @@ TEST_F(FeedTransactionTest, SubAccountV2)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubBothTransactionAndAccount)
+TEST_P(FeedTransactionTest, SubBothTransactionAndAccount)
 {
     auto const account = getAccountIdWithString(kAccount1);
     EXPECT_CALL(*mockSessionPtr, onDisconnect).Times(2);
@@ -396,7 +423,7 @@ TEST_F(FeedTransactionTest, SubBothTransactionAndAccount)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubBookV1)
+TEST_P(FeedTransactionTest, SubBookV1)
 {
     auto const issue1 = getIssue(kCurrency, kIssuer);
     xrpl::Book const book{xrpl::xrpIssue(), issue1, std::nullopt};
@@ -585,7 +612,7 @@ TEST_F(FeedTransactionTest, SubBookV1)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubBookV2)
+TEST_P(FeedTransactionTest, SubBookV2)
 {
     auto const issue1 = getIssue(kCurrency, kIssuer);
     xrpl::Book const book{xrpl::xrpIssue(), issue1, std::nullopt};
@@ -666,7 +693,7 @@ TEST_F(FeedTransactionTest, SubBookV2)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, TransactionContainsBothAccountsSubed)
+TEST_P(FeedTransactionTest, TransactionContainsBothAccountsSubed)
 {
     auto const account = getAccountIdWithString(kAccount1);
 
@@ -704,7 +731,7 @@ TEST_F(FeedTransactionTest, TransactionContainsBothAccountsSubed)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubAccountRepeatWithDifferentVersion)
+TEST_P(FeedTransactionTest, SubAccountRepeatWithDifferentVersion)
 {
     auto const account = getAccountIdWithString(kAccount1);
 
@@ -744,7 +771,7 @@ TEST_F(FeedTransactionTest, SubAccountRepeatWithDifferentVersion)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubTransactionRepeatWithDifferentVersion)
+TEST_P(FeedTransactionTest, SubTransactionRepeatWithDifferentVersion)
 {
     // sub version 1 first
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
@@ -773,7 +800,7 @@ TEST_F(FeedTransactionTest, SubTransactionRepeatWithDifferentVersion)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubRepeat)
+TEST_P(FeedTransactionTest, SubRepeat)
 {
     auto const session2 = std::make_shared<MockSession>();
 
@@ -835,7 +862,7 @@ TEST_F(FeedTransactionTest, SubRepeat)
     EXPECT_EQ(testFeedPtr->bookSubCount(), 0);
 }
 
-TEST_F(FeedTransactionTest, NoSubscribersSkipsOwnerFundsWithoutCache)
+TEST_P(FeedTransactionTest, NoSubscribersSkipsOwnerFundsWithoutCache)
 {
     backend_->cache().setDisabled();
     auto const ledgerHeader = createLedgerHeader(kLedgerHash, 33);
@@ -862,7 +889,7 @@ TEST_F(FeedTransactionTest, NoSubscribersSkipsOwnerFundsWithoutCache)
     testFeedPtr->pub(transaction, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, PubTransactionWithOwnerFund)
+TEST_P(FeedTransactionTest, PubTransactionWithOwnerFund)
 {
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
     testFeedPtr->sub(sessionPtr);
@@ -948,7 +975,7 @@ TEST_F(FeedTransactionTest, PubTransactionWithOwnerFund)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, PublishesNFTokenMintTx)
+TEST_P(FeedTransactionTest, PublishesNFTokenMintTx)
 {
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
     testFeedPtr->sub(sessionPtr);
@@ -1004,7 +1031,7 @@ static constexpr auto kTranFrozen =
         "engine_result_message": "The transaction was applied. Only final in a validated ledger."
     })JSON";
 
-TEST_F(FeedTransactionTest, PubTransactionOfferCreationFrozenLine)
+TEST_P(FeedTransactionTest, PubTransactionOfferCreationFrozenLine)
 {
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
     testFeedPtr->sub(sessionPtr);
@@ -1045,7 +1072,7 @@ TEST_F(FeedTransactionTest, PubTransactionOfferCreationFrozenLine)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubTransactionOfferCreationGlobalFrozen)
+TEST_P(FeedTransactionTest, SubTransactionOfferCreationGlobalFrozen)
 {
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
     testFeedPtr->sub(sessionPtr);
@@ -1087,7 +1114,7 @@ TEST_F(FeedTransactionTest, SubTransactionOfferCreationGlobalFrozen)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubBothProposedAndValidatedAccount)
+TEST_P(FeedTransactionTest, SubBothProposedAndValidatedAccount)
 {
     auto const account = getAccountIdWithString(kAccount1);
 
@@ -1118,7 +1145,7 @@ TEST_F(FeedTransactionTest, SubBothProposedAndValidatedAccount)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubBothProposedAndValidated)
+TEST_P(FeedTransactionTest, SubBothProposedAndValidated)
 {
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
     testFeedPtr->sub(sessionPtr);
@@ -1145,7 +1172,7 @@ TEST_F(FeedTransactionTest, SubBothProposedAndValidated)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubProposedDisconnect)
+TEST_P(FeedTransactionTest, SubProposedDisconnect)
 {
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
     testFeedPtr->subProposed(sessionPtr);
@@ -1168,7 +1195,7 @@ TEST_F(FeedTransactionTest, SubProposedDisconnect)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, SubProposedAccountDisconnect)
+TEST_P(FeedTransactionTest, SubProposedAccountDisconnect)
 {
     auto const account = getAccountIdWithString(kAccount1);
 
@@ -1195,7 +1222,7 @@ TEST_F(FeedTransactionTest, SubProposedAccountDisconnect)
 
 // This test exercises `accountHold` for amendment fixFrozenLPTokenTransfer, so that the output
 // shows "owner_funds: 0" if the currency in the amm pool is frozen
-TEST_F(FeedTransactionTest, PubTransactionWithOwnerFundFrozenLPToken)
+TEST_P(FeedTransactionTest, PubTransactionWithOwnerFundFrozenLPToken)
 {
     EXPECT_CALL(*mockSessionPtr, onDisconnect);
     testFeedPtr->sub(sessionPtr);
@@ -1302,7 +1329,7 @@ TEST_F(FeedTransactionTest, PubTransactionWithOwnerFundFrozenLPToken)
     testFeedPtr->pub(trans1, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, PublishesMPTokenIssuanceCreateTx)
+TEST_P(FeedTransactionTest, PublishesMPTokenIssuanceCreateTx)
 {
     constexpr auto kMptokenIssuanceCreateTranV1 =
         R"JSON({
@@ -1370,7 +1397,7 @@ TEST_F(FeedTransactionTest, PublishesMPTokenIssuanceCreateTx)
     testFeedPtr->pub(trans, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
 }
 
-TEST_F(FeedTransactionTest, PublishesMPTokenAuthorizeTx)
+TEST_P(FeedTransactionTest, PublishesMPTokenAuthorizeTx)
 {
     constexpr auto kMptokenAuthorizeTranV1 =
         R"JSON({
@@ -1428,6 +1455,95 @@ TEST_F(FeedTransactionTest, PublishesMPTokenAuthorizeTx)
 
     testFeedPtr->unsub(sessionPtr);
     testFeedPtr->pub(trans, ledgerHeader, backend_, mockAmendmentCenterPtr_, kNetworkId);
+}
+
+using FeedTransactionBatchTest = FeedBaseTest<TransactionFeed>;
+
+TEST_F(FeedTransactionBatchTest, BoundedPreparationPreservesOrderDespiteReverseCompletion)
+{
+    EXPECT_CALL(*mockSessionPtr, onDisconnect);
+    testFeedPtr->sub(sessionPtr);
+    auto const ledger = createLedgerHeader(kLedgerHash, 33);
+    std::vector<TransactionAndMetadata> transactions;
+    for (uint32_t i = 0; i < 17; ++i) {
+        TransactionAndMetadata transaction;
+        transaction.transaction =
+            createCreateOfferTransactionObject(kAccount1, 1, i + 1, kCurrency, kIssuer, 1, 3)
+                .getSerializer().peekData();
+        xrpl::STObject meta(xrpl::sfTransactionMetaData);
+        meta.setFieldArray(xrpl::sfAffectedNodes, xrpl::STArray{0});
+        meta.setFieldU8(xrpl::sfTransactionResult, xrpl::tesSUCCESS);
+        meta.setFieldU32(xrpl::sfTransactionIndex, i);
+        transaction.metadata = meta.getSerializer().peekData();
+        transactions.push_back(std::move(transaction));
+    }
+
+    int active = 0;
+    int peak = 0;
+    int requested = 0;
+    int completed = 0;
+    std::vector<int> completionOrder;
+    std::vector<std::shared_ptr<boost::asio::steady_timer>> waiting;
+    EXPECT_CALL(*backend_, doFetchLedgerObject)
+        .Times(17)
+        .WillRepeatedly([&](auto const&, auto, boost::asio::yield_context yield)
+                           -> std::optional<Blob> {
+            auto const index = requested++;
+            peak = std::max(peak, ++active);
+            auto timer = std::make_shared<boost::asio::steady_timer>(yield.get_executor());
+            // A finite fallback makes a broken concurrency window fail, not hang CI.
+            timer->expires_after(std::chrono::seconds{1});
+            waiting.push_back(timer);
+            if (waiting.size() == static_cast<std::size_t>(std::min(8, 17 - completed))) {
+                auto release = std::move(waiting);
+                waiting.clear();
+                boost::asio::post(yield.get_executor(), [release = std::move(release)] {
+                    for (auto it = release.rbegin(); it != release.rend(); ++it)
+                        (*it)->cancel();
+                });
+            }
+            boost::system::error_code error;
+            timer->async_wait(yield[error]);
+            EXPECT_EQ(error, boost::asio::error::operation_aborted);
+            std::erase(waiting, timer);
+            --active;
+            ++completed;
+            completionOrder.push_back(index);
+            return std::nullopt;  // An absent trust line has zero owner funds.
+        });
+    int emitted = 0;
+    EXPECT_CALL(*mockSessionPtr, apiSubversion).Times(17).WillRepeatedly(testing::Return(1));
+    EXPECT_CALL(*mockSessionPtr, send).Times(17).WillRepeatedly([&](auto const& message) {
+        EXPECT_EQ(active, 0);
+        auto const value = boost::json::parse(*message).as_object();
+        EXPECT_EQ(value.at("meta").as_object().at("TransactionIndex").as_int64(), emitted++);
+        EXPECT_EQ(value.at("transaction").as_object().at("owner_funds").as_string(), "0");
+    });
+    testFeedPtr->pubBatch(transactions, ledger, backend_, mockAmendmentCenterPtr_, kNetworkId);
+    EXPECT_EQ(peak, 8);
+    EXPECT_EQ(completed, 17);
+    EXPECT_EQ(emitted, 17);
+    ASSERT_EQ(completionOrder.size(), 17);
+    EXPECT_NE(completionOrder.front(), 0);
+}
+
+TEST_F(FeedTransactionBatchTest, PreparationFailurePreservesSuccessfulPrefix)
+{
+    EXPECT_CALL(*mockSessionPtr, onDisconnect);
+    testFeedPtr->sub(sessionPtr);
+    auto const ledger = createLedgerHeader(kLedgerHash, 33);
+    TransactionAndMetadata valid;
+    valid.transaction = createPaymentTransactionObject(kAccount1, kAccount2, 1, 1, 32)
+                            .getSerializer().peekData();
+    valid.metadata = createPaymentTransactionMetaObject(kAccount1, kAccount2, 110, 30, 22)
+                         .getSerializer().peekData();
+    std::vector<TransactionAndMetadata> transactions{valid, TransactionAndMetadata{}, valid};
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(0);
+    EXPECT_CALL(*mockSessionPtr, apiSubversion).WillOnce(testing::Return(1));
+    EXPECT_CALL(*mockSessionPtr, send(sharedStringJsonEq(kTranV1))).Times(1);
+    EXPECT_ANY_THROW(testFeedPtr->pubBatch(
+        transactions, ledger, backend_, mockAmendmentCenterPtr_, kNetworkId
+    ));
 }
 
 struct TransactionFeedMockPrometheusTest : WithMockPrometheus, SyncExecutionCtxFixture {

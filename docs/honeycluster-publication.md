@@ -113,6 +113,31 @@ The instrumentation does not skip cache updates, alter ordering, or parallelize
 active feeds. Sustained live qualification and a measured performance correction
 remain prerequisites for further deployment.
 
+### Bounded transaction preparation candidate
+
+A private cache-disabled reader was observed for 30 seconds with ledger-only
+subscriptions, 300 seconds with an active transaction subscriber, then 60 seconds
+without that transaction subscriber. During the active interval, median transaction
+notification work was **6.005 seconds per ledger**, with queue waits reaching
+**110.289 seconds**. Median diff reads were **0.277 seconds**, metadata sorting
+**0.030 seconds**. After unsubscribe, notification work became negligible and the
+queue drained. The diagnostic container and its copied credentials were removed.
+
+The next candidate prepares at most **eight** transactions using cooperative
+coroutines on the publishing thread, then dispatches that window strictly in input
+order. It adds no worker threads and does not skip owner-funds calculations,
+change ledger sequence, or modify JSON construction/routing. Transient funding
+errors use the existing coroutine-aware retry policy. Other errors are collected
+until outstanding reads drain, then the successful input prefix is dispatched
+before the earliest input error is rethrown.
+
+All existing transaction-feed payload/subscription assertions now run against both
+serial and single-element batch preparation. A 17-transaction regression exercises
+reverse completion, an eight-request limit, and ordered dispatch. Another checks
+error-prefix behavior. Both binaries rebuilt; targeted suites and all **3,355
+enabled tests passed three repetitions**. Live sustained-stream and payload-parity
+qualification is still pending: unit passes alone do not authorize fleet rollout.
+
 ## Recorded live qualification (2026-10-06/07)
 
 The published operator candidate is:

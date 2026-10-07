@@ -203,8 +203,7 @@ public:
                 });
                 timing.mark("metadata_sort");
 
-                for (auto const& txAndMeta : transactions)
-                    subscriptions_->pubTransaction(txAndMeta, lgrInfo);
+                subscriptions_->pubTransactions(transactions, lgrInfo);
                 timing.mark("transaction_notifications");
 
                 subscriptions_->pubBookChanges(lgrInfo, transactions);
