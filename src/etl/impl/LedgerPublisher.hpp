@@ -5,6 +5,7 @@
 #include "etl/LedgerPublisherInterface.hpp"
 #include "etl/SystemState.hpp"
 #include "etl/impl/Loading.hpp"
+#include "etl/impl/PublicationTiming.hpp"
 #include "feed/SubscriptionManagerInterface.hpp"
 #include "util/Assert.hpp"
 #include "util/Mutex.hpp"
@@ -159,7 +160,9 @@ public:
     void
     publish(xrpl::LedgerHeader const& lgrInfo)
     {
-        publishStrand_.submit([this, lgrInfo = lgrInfo] {
+        publishStrand_.submit([this, lgrInfo = lgrInfo, queuedAt = PublicationTiming::startPoint()] {
+            PublicationTiming timing{log_, lgrInfo.seq, "publish", queuedAt};
+            timing.mark("queue_wait");
             LOG(log_.info()) << "Publishing ledger " << std::to_string(lgrInfo.seq);
 
             setLastClose(lgrInfo.closeTime);
@@ -174,10 +177,12 @@ public:
                         return backend_->fetchFees(lgrInfo.seq, yield);
                     });
                 ASSERT(fees.has_value(), "Fees must exist for ledger {}", lgrInfo.seq);
+                timing.mark("fees");
 
                 auto transactions = data::synchronousAndRetryOnTimeout([&](auto yield) {
                     return backend_->fetchAllTransactionsInLedger(lgrInfo.seq, yield);
                 });
+                timing.mark("transactions_read");
 
                 auto const ledgerRange = backend_->fetchLedgerRange();
                 ASSERT(ledgerRange.has_value(), "Ledger range must exist");
@@ -185,6 +190,7 @@ public:
                 auto const range =
                     fmt::format("{}-{}", ledgerRange->minSequence, ledgerRange->maxSequence);
                 subscriptions_->pubLedger(lgrInfo, *fees, range, transactions.size());
+                timing.mark("ledger_dispatch");
 
                 // order with transaction index
                 std::ranges::sort(transactions, [](auto const& t1, auto const& t2) {
@@ -195,11 +201,14 @@ public:
                     return object1.getFieldU32(xrpl::sfTransactionIndex) <
                         object2.getFieldU32(xrpl::sfTransactionIndex);
                 });
+                timing.mark("metadata_sort");
 
                 for (auto const& txAndMeta : transactions)
                     subscriptions_->pubTransaction(txAndMeta, lgrInfo);
+                timing.mark("transaction_notifications");
 
                 subscriptions_->pubBookChanges(lgrInfo, transactions);
+                timing.mark("book_changes");
 
                 setLastPublishTime();
                 LOG(log_.info()) << "Published ledger " << lgrInfo.seq;

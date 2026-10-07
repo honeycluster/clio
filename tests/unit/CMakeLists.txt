@@ -57,6 +57,7 @@ target_sources(
         etl/ForwardingSourceTests.cpp
         etl/GrpcSourceTests.cpp
         etl/LedgerPublisherTests.cpp
+        etl/PublicationTimingTests.cpp
         etl/LoadBalancerTests.cpp
         etl/LoadingTests.cpp
         etl/MonitorTests.cpp

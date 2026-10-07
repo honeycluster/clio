@@ -83,7 +83,35 @@ Results:
   argument rejection were checked with command fixtures.
 
 Keep a CI/job wall-time limit around repeated suites. Do not remove signal tests
-or weaken assertions to hide the unresolved repeat-run behavior.
+or weaken assertions to hide repeat-run behavior.
+
+### Follow-up: shutdown wakeup correction and opt-in stage diagnostics
+
+The destructor and graceful-completion path updated the condition-variable
+predicate outside the waiter's mutex. Atomic state alone does not prevent a
+notification from being lost between predicate evaluation and entering the wait.
+Those ordinary-thread updates now hold that mutex. This is a scoped lost-wakeup
+correction, not a redesign or certification of all asynchronous signal handling.
+
+A new immediate-construction/destruction regression test runs 1,000 cycles.
+Shutdown suites passed 100 repetitions (100,000 such cycles), and the complete
+**3,328-test enabled suite passed three in-process repetitions** after rebuilding.
+The earlier repeat-run hang above remains part of the history.
+
+`CLIO_PUBLICATION_TIMINGS=1` enables diagnostic-only INFO records on the ETL log
+channel. Use it only on isolated qualification readers initially. It records
+ledger sequence, static operation/stage names, elapsed microseconds, and cumulative
+microseconds, never transaction bodies or caller parameters. Logging must allow
+ETL INFO to expose the records. Diagnostics are off by default.
+
+Stages distinguish monitor cache checks, diff reads, cache updates and publication
+requests; and publisher queue wait, fee/transaction reads, ledger dispatch,
+metadata sorting, transaction notifications and book changes. `publish` cumulative
+time includes queue wait. Individual stages can include small logging/bookkeeping
+overheads; transaction notification timing still combines funding and serialization.
+The instrumentation does not skip cache updates, alter ordering, or parallelize
+active feeds. Sustained live qualification and a measured performance correction
+remain prerequisites for further deployment.
 
 ## Recorded live qualification (2026-10-06/07)
 

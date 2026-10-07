@@ -27,6 +27,7 @@
 #include "etl/impl/LedgerPublisher.hpp"
 #include "etl/impl/Loading.hpp"
 #include "etl/impl/MonitorProvider.hpp"
+#include "etl/impl/PublicationTiming.hpp"
 #include "etl/impl/Registry.hpp"
 #include "etl/impl/Scheduling.hpp"
 #include "etl/impl/TaskManager.hpp"
@@ -344,21 +345,27 @@ ETLService::loadInitialLedgerIfNeeded()
 void
 ETLService::updateCache(uint32_t seq)
 {
+    impl::PublicationTiming timing{log_, seq, "monitor"};
     auto const cacheNeedsUpdate = backend_->cache().latestLedgerSequence() < seq;
     auto const backendRange = backend_->fetchLedgerRange();
     auto const backendNeedsUpdate = backendRange.has_value() and backendRange->maxSequence < seq;
 
+    timing.mark("cache_check");
     if (cacheNeedsUpdate) {
         auto const diff = data::synchronousAndRetryOnTimeout([this, seq](auto yield) {
             return backend_->fetchLedgerDiff(seq, yield);
         });
+        timing.mark("diff_read");
         cacheUpdater_->update(seq, diff);
+        timing.mark("cache_update");
     }
 
     if (backendNeedsUpdate)
         backend_->updateRange(seq);
 
+    timing.mark("range_update");
     publisher_->publish(seq, {});
+    timing.mark("publish_request");
 }
 
 void

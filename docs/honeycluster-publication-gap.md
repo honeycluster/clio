@@ -123,5 +123,7 @@ Using reviewed private endpoints and an authorized existing caller:
 
 The runtime fix currently implemented on this branch is only the no-listener
 transaction-feed early return described in [the change record](honeycluster-publication.md).
-Stage-timing instrumentation, a disabled-cache guard, active-feed parallelization,
-and writer scheduling changes are **not implemented by these commits**.
+Opt-in stage-timing instrumentation is now available for private diagnosis; see
+the change record for its scope and unit verification. A disabled-cache guard,
+active-feed parallelization, and writer scheduling changes are **not implemented**.
+No serving-reader resolution is inferred from adding instrumentation.
