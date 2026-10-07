@@ -64,7 +64,12 @@ SignalsHandler::~SignalsHandler()
 {
     setHandler();
 
-    state_ = State::NormalExit;
+    // The predicate update must share the waiter's mutex. An atomic state alone
+    // does not prevent notify_one() racing between its predicate check and wait.
+    {
+        std::lock_guard const lock{mutex_};
+        state_ = State::NormalExit;
+    }
     cv_.notify_one();
 
     if (workerThread_.joinable())
@@ -77,6 +82,7 @@ SignalsHandler::~SignalsHandler()
 void
 SignalsHandler::notifyGracefulShutdownComplete()
 {
+    std::lock_guard const lock{mutex_};
     if (state_ == State::GracefulShutdown) {
         LOG(LogService::info()) << "Graceful shutdown completed successfully.";
         state_ = State::NormalExit;

@@ -61,6 +61,21 @@ TEST_F(SignalsHandlerAssertTest, CantCreateTwoSignalsHandlers)
     EXPECT_CLIO_ASSERT_FAIL({ makeHandler(); });
 }
 
+TEST(SignalsHandlerLifecycleTests, RepeatedImmediateDestructionWithoutSignal)
+{
+    // Exercise startup/destruction overlap. A predicate update outside the
+    // waiter's mutex can lose the destruction notification and hang join().
+    for (auto i = 0; i < 1000; ++i) {
+        SignalsHandler const handler{
+            ClioConfigDefinition{
+                {"graceful_period", ConfigValue{ConfigType::Double}.defaultValue(1.0)}
+            },
+            []() { FAIL() << "No signal was sent"; }
+        };
+        std::this_thread::yield();
+    }
+}
+
 struct SignalsHandlerTests : SignalsHandlerTestsBase {
 protected:
     SignalsHandler handler_{
