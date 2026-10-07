@@ -40,13 +40,16 @@ struct ClusterBackendTest : util::prometheus::WithPrometheus, MockBackendTestStr
     testing::StrictMock<
         testing::MockFunction<void(ClioNode::CUuid, std::shared_ptr<Backend::ClusterData const>)>>
         callbackMock;
-    std::binary_semaphore semaphore{0};
+    // Repeated callbacks can arrive before the waiting test is scheduled.
+    std::counting_semaphore<> semaphore{0};
+    std::counting_semaphore<> reads{0};
+    std::counting_semaphore<> writes{0};
 
     class SemaphoreReleaseGuard {
-        std::binary_semaphore& semaphore_;
+        std::counting_semaphore<>& semaphore_;
 
     public:
-        SemaphoreReleaseGuard(std::binary_semaphore& s) : semaphore_(s)
+        SemaphoreReleaseGuard(std::counting_semaphore<>& s) : semaphore_(s)
         {
         }
         ~SemaphoreReleaseGuard()
@@ -71,8 +74,13 @@ TEST_F(ClusterBackendTest, SubscribeToNewState)
 
     EXPECT_CALL(*backend_, fetchClioNodesData)
         .Times(testing::AtLeast(1))
-        .WillRepeatedly(testing::Return(BackendInterface::ClioNodesDataFetchResult{}));
-    EXPECT_CALL(*backend_, writeNodeMessage).Times(testing::AtLeast(1));
+        .WillRepeatedly(testing::DoAll(
+            testing::InvokeWithoutArgs([this] { reads.release(); }),
+            testing::Return(BackendInterface::ClioNodesDataFetchResult{})
+        ));
+    EXPECT_CALL(*backend_, writeNodeMessage)
+        .Times(testing::AtLeast(1))
+        .WillRepeatedly([this] { writes.release(); });
     EXPECT_CALL(writerStateRef, isReadOnly)
         .Times(testing::AtLeast(1))
         .WillRepeatedly(testing::Return(true));
@@ -98,7 +106,9 @@ TEST_F(ClusterBackendTest, SubscribeToNewState)
         });
 
     clusterBackend.run();
-    semaphore.acquire();
+    ASSERT_TRUE(semaphore.try_acquire_for(std::chrono::seconds{5}));
+    // Read and write tasks are independent; observe both before stopping them.
+    ASSERT_TRUE(writes.try_acquire_for(std::chrono::seconds{5}));
 }
 
 TEST_F(ClusterBackendTest, Stop)
@@ -114,8 +124,13 @@ TEST_F(ClusterBackendTest, Stop)
 
     EXPECT_CALL(*backend_, fetchClioNodesData)
         .Times(testing::AtLeast(1))
-        .WillRepeatedly(testing::Return(BackendInterface::ClioNodesDataFetchResult{}));
-    EXPECT_CALL(*backend_, writeNodeMessage).Times(testing::AtLeast(1));
+        .WillRepeatedly(testing::DoAll(
+            testing::InvokeWithoutArgs([this] { reads.release(); }),
+            testing::Return(BackendInterface::ClioNodesDataFetchResult{})
+        ));
+    EXPECT_CALL(*backend_, writeNodeMessage)
+        .Times(testing::AtLeast(1))
+        .WillRepeatedly([this] { writes.release(); });
     EXPECT_CALL(writerStateRef, isReadOnly)
         .Times(testing::AtLeast(1))
         .WillRepeatedly(testing::Return(true));
@@ -127,7 +142,8 @@ TEST_F(ClusterBackendTest, Stop)
         .WillRepeatedly(testing::Return(false));
 
     clusterBackend.run();
-    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    ASSERT_TRUE(reads.try_acquire_for(std::chrono::seconds{5}));
+    ASSERT_TRUE(writes.try_acquire_for(std::chrono::seconds{5}));
     clusterBackend.stop();
 
     testing::Mock::VerifyAndClearExpectations(&(*backend_));
@@ -151,7 +167,9 @@ TEST_F(ClusterBackendTest, FetchClioNodesDataThrowsException)
     EXPECT_CALL(*backend_, fetchClioNodesData)
         .Times(testing::AtLeast(1))
         .WillRepeatedly(testing::Throw(std::runtime_error("Database connection failed")));
-    EXPECT_CALL(*backend_, writeNodeMessage).Times(testing::AtLeast(1));
+    EXPECT_CALL(*backend_, writeNodeMessage)
+        .Times(testing::AtLeast(1))
+        .WillRepeatedly([this] { writes.release(); });
     EXPECT_CALL(writerStateRef, isReadOnly)
         .Times(testing::AtLeast(1))
         .WillRepeatedly(testing::Return(true));
@@ -172,7 +190,9 @@ TEST_F(ClusterBackendTest, FetchClioNodesDataThrowsException)
         );
 
     clusterBackend.run();
-    semaphore.acquire();
+    ASSERT_TRUE(semaphore.try_acquire_for(std::chrono::seconds{5}));
+    // Read and write tasks are independent; observe both before stopping them.
+    ASSERT_TRUE(writes.try_acquire_for(std::chrono::seconds{5}));
 }
 
 TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsDataWithOtherNodes)
@@ -208,7 +228,9 @@ TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsDataWithOtherNodes)
                 }
             )
         );
-    EXPECT_CALL(*backend_, writeNodeMessage).Times(testing::AtLeast(1));
+    EXPECT_CALL(*backend_, writeNodeMessage)
+        .Times(testing::AtLeast(1))
+        .WillRepeatedly([this] { writes.release(); });
     EXPECT_CALL(writerStateRef, isReadOnly)
         .Times(testing::AtLeast(1))
         .WillRepeatedly(testing::Return(false));
@@ -255,7 +277,9 @@ TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsDataWithOtherNodes)
         });
 
     clusterBackend.run();
-    semaphore.acquire();
+    ASSERT_TRUE(semaphore.try_acquire_for(std::chrono::seconds{5}));
+    // Read and write tasks are independent; observe both before stopping them.
+    ASSERT_TRUE(writes.try_acquire_for(std::chrono::seconds{5}));
 }
 
 TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsOnlySelfData)
@@ -286,7 +310,9 @@ TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsOnlySelfData)
             }
         };
     });
-    EXPECT_CALL(*backend_, writeNodeMessage).Times(testing::AtLeast(1));
+    EXPECT_CALL(*backend_, writeNodeMessage)
+        .Times(testing::AtLeast(1))
+        .WillRepeatedly([this] { writes.release(); });
     EXPECT_CALL(writerStateRef, isReadOnly)
         .Times(testing::AtLeast(1))
         .WillRepeatedly(testing::Return(true));
@@ -312,7 +338,9 @@ TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsOnlySelfData)
         });
 
     clusterBackend.run();
-    semaphore.acquire();
+    ASSERT_TRUE(semaphore.try_acquire_for(std::chrono::seconds{5}));
+    // Read and write tasks are independent; observe both before stopping them.
+    ASSERT_TRUE(writes.try_acquire_for(std::chrono::seconds{5}));
 }
 
 TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsInvalidJson)
@@ -342,7 +370,9 @@ TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsInvalidJson)
                 }
             )
         );
-    EXPECT_CALL(*backend_, writeNodeMessage).Times(testing::AtLeast(1));
+    EXPECT_CALL(*backend_, writeNodeMessage)
+        .Times(testing::AtLeast(1))
+        .WillRepeatedly([this] { writes.release(); });
     EXPECT_CALL(writerStateRef, isReadOnly)
         .Times(testing::AtLeast(1))
         .WillRepeatedly(testing::Return(true));
@@ -364,7 +394,9 @@ TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsInvalidJson)
         });
 
     clusterBackend.run();
-    semaphore.acquire();
+    ASSERT_TRUE(semaphore.try_acquire_for(std::chrono::seconds{5}));
+    // Read and write tasks are independent; observe both before stopping them.
+    ASSERT_TRUE(writes.try_acquire_for(std::chrono::seconds{5}));
 }
 
 TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsValidJsonButCannotConvertToClioNode)
@@ -398,7 +430,9 @@ TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsValidJsonButCannotConvertToC
                 }
             )
         );
-    EXPECT_CALL(*backend_, writeNodeMessage).Times(testing::AtLeast(1));
+    EXPECT_CALL(*backend_, writeNodeMessage)
+        .Times(testing::AtLeast(1))
+        .WillRepeatedly([this] { writes.release(); });
     EXPECT_CALL(writerStateRef, isReadOnly)
         .Times(testing::AtLeast(1))
         .WillRepeatedly(testing::Return(true));
@@ -421,7 +455,9 @@ TEST_F(ClusterBackendTest, FetchClioNodesDataReturnsValidJsonButCannotConvertToC
         );
 
     clusterBackend.run();
-    semaphore.acquire();
+    ASSERT_TRUE(semaphore.try_acquire_for(std::chrono::seconds{5}));
+    // Read and write tasks are independent; observe both before stopping them.
+    ASSERT_TRUE(writes.try_acquire_for(std::chrono::seconds{5}));
 }
 
 TEST_F(ClusterBackendTest, WriteNodeMessageWritesSelfDataWithRecentTimestampAndDbRole)
@@ -440,7 +476,10 @@ TEST_F(ClusterBackendTest, WriteNodeMessageWritesSelfDataWithRecentTimestampAndD
 
     EXPECT_CALL(*backend_, fetchClioNodesData)
         .Times(testing::AtLeast(1))
-        .WillRepeatedly(testing::Return(BackendInterface::ClioNodesDataFetchResult{}));
+        .WillRepeatedly(testing::DoAll(
+            testing::InvokeWithoutArgs([this] { reads.release(); }),
+            testing::Return(BackendInterface::ClioNodesDataFetchResult{})
+        ));
     EXPECT_CALL(writerStateRef, isReadOnly)
         .Times(testing::AtLeast(1))
         .WillRepeatedly(testing::Return(false));
@@ -475,7 +514,9 @@ TEST_F(ClusterBackendTest, WriteNodeMessageWritesSelfDataWithRecentTimestampAndD
         });
 
     clusterBackend.run();
-    semaphore.acquire();
+    ASSERT_TRUE(semaphore.try_acquire_for(std::chrono::seconds{5}));
+    // Read and write tasks are independent; observe both before stopping them.
+    ASSERT_TRUE(reads.try_acquire_for(std::chrono::seconds{5}));
 }
 
 TEST_F(ClusterBackendTest, WriteNodeMessageReflectsCacheIsCurrentlyLoading)
@@ -492,7 +533,10 @@ TEST_F(ClusterBackendTest, WriteNodeMessageReflectsCacheIsCurrentlyLoading)
 
     EXPECT_CALL(*backend_, fetchClioNodesData)
         .Times(testing::AtLeast(1))
-        .WillRepeatedly(testing::Return(BackendInterface::ClioNodesDataFetchResult{}));
+        .WillRepeatedly(testing::DoAll(
+            testing::InvokeWithoutArgs([this] { reads.release(); }),
+            testing::Return(BackendInterface::ClioNodesDataFetchResult{})
+        ));
     EXPECT_CALL(writerStateRef, isReadOnly)
         .Times(testing::AtLeast(1))
         .WillRepeatedly(testing::Return(true));
@@ -516,7 +560,9 @@ TEST_F(ClusterBackendTest, WriteNodeMessageReflectsCacheIsCurrentlyLoading)
         });
 
     clusterBackend.run();
-    semaphore.acquire();
+    ASSERT_TRUE(semaphore.try_acquire_for(std::chrono::seconds{5}));
+    // Read and write tasks are independent; observe both before stopping them.
+    ASSERT_TRUE(reads.try_acquire_for(std::chrono::seconds{5}));
 }
 
 TEST_F(ClusterBackendTest, SubscribeToNewStateReflectsCacheIsCurrentlyLoading)
@@ -535,8 +581,13 @@ TEST_F(ClusterBackendTest, SubscribeToNewStateReflectsCacheIsCurrentlyLoading)
 
     EXPECT_CALL(*backend_, fetchClioNodesData)
         .Times(testing::AtLeast(1))
-        .WillRepeatedly(testing::Return(BackendInterface::ClioNodesDataFetchResult{}));
-    EXPECT_CALL(*backend_, writeNodeMessage).Times(testing::AtLeast(1));
+        .WillRepeatedly(testing::DoAll(
+            testing::InvokeWithoutArgs([this] { reads.release(); }),
+            testing::Return(BackendInterface::ClioNodesDataFetchResult{})
+        ));
+    EXPECT_CALL(*backend_, writeNodeMessage)
+        .Times(testing::AtLeast(1))
+        .WillRepeatedly([this] { writes.release(); });
     EXPECT_CALL(writerStateRef, isReadOnly)
         .Times(testing::AtLeast(1))
         .WillRepeatedly(testing::Return(true));
@@ -564,5 +615,7 @@ TEST_F(ClusterBackendTest, SubscribeToNewStateReflectsCacheIsCurrentlyLoading)
         });
 
     clusterBackend.run();
-    semaphore.acquire();
+    ASSERT_TRUE(semaphore.try_acquire_for(std::chrono::seconds{5}));
+    // Read and write tasks are independent; observe both before stopping them.
+    ASSERT_TRUE(writes.try_acquire_for(std::chrono::seconds{5}));
 }
