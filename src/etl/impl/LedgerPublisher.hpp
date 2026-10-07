@@ -5,10 +5,10 @@
 #include "etl/LedgerPublisherInterface.hpp"
 #include "etl/SystemState.hpp"
 #include "etl/impl/Loading.hpp"
-#include "etl/impl/PublicationTiming.hpp"
 #include "feed/SubscriptionManagerInterface.hpp"
 #include "util/Assert.hpp"
 #include "util/Mutex.hpp"
+#include "util/PublicationTiming.hpp"
 #include "util/async/AnyExecutionContext.hpp"
 #include "util/async/AnyStrand.hpp"
 #include "util/log/Logger.hpp"
@@ -160,8 +160,8 @@ public:
     void
     publish(xrpl::LedgerHeader const& lgrInfo)
     {
-        publishStrand_.submit([this, lgrInfo = lgrInfo, queuedAt = PublicationTiming::startPoint()] {
-            PublicationTiming timing{log_, lgrInfo.seq, "publish", queuedAt};
+        publishStrand_.submit([this, lgrInfo = lgrInfo, queuedAt = util::PublicationTiming::startPoint()] {
+            util::PublicationTiming timing{log_, lgrInfo.seq, "publish", queuedAt};
             timing.mark("queue_wait");
             LOG(log_.info()) << "Publishing ledger " << std::to_string(lgrInfo.seq);
 

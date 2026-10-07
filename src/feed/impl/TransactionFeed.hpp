@@ -191,7 +191,7 @@ public:
         uint32_t networkID);
 
     /**
-     * @brief Prepare at most eight transactions concurrently, then dispatch in input order.
+     * @brief Prepare at most 64 transactions concurrently, then dispatch in input order.
      * @note Input must already be sorted by TransactionIndex. Preparation uses cooperative
      * coroutines on the calling thread, not additional threads or an unbounded task queue.
      */

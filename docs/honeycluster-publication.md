@@ -98,11 +98,11 @@ Shutdown suites passed 100 repetitions (100,000 such cycles), and the complete
 **3,328-test enabled suite passed three in-process repetitions** after rebuilding.
 The earlier repeat-run hang above remains part of the history.
 
-`CLIO_PUBLICATION_TIMINGS=1` enables diagnostic-only INFO records on the ETL log
-channel. Use it only on isolated qualification readers initially. It records
+`CLIO_PUBLICATION_TIMINGS=1` enables diagnostic-only INFO records on the ETL and
+Subscriptions log channels. Use it only on isolated qualification readers initially. It records
 ledger sequence, static operation/stage names, elapsed microseconds, and cumulative
 microseconds, never transaction bodies or caller parameters. Logging must allow
-ETL INFO to expose the records. Diagnostics are off by default.
+ETL and Subscriptions INFO to expose all records. Diagnostics are off by default.
 
 Stages distinguish monitor cache checks, diff reads, cache updates and publication
 requests; and publisher queue wait, fee/transaction reads, ledger dispatch,
@@ -137,6 +137,26 @@ reverse completion, an eight-request limit, and ordered dispatch. Another checks
 error-prefix behavior. Both binaries rebuilt; targeted suites and all **3,355
 enabled tests passed three repetitions**. Live sustained-stream and payload-parity
 qualification is still pending: unit passes alone do not authorize fleet rollout.
+
+The eight-slot candidate subsequently ran beside the serial control for ten
+minutes of active subscriptions, with API 1, API 2, and a book selected from
+observed OfferCreate activity. Exact transaction bytes matched for **5,658
+transactions per API across 82 complete ledgers**; **548 book notifications across
+60 complete ledgers** matched. Stable ledger fields matched (the advancing
+`validated_ledgers` range was excluded). No duplicate or out-of-order notifications
+were observed. Both private readers reported zero too-busy errors and were removed.
+
+However, it **failed the burst-latency gate**: a 1,708-transaction ledger produced a
+47.193-second notification stage, queue wait reached 94.779 seconds, and delivered
+ledger age reached 113.857 seconds. Payload correctness is not liveness qualification.
+No production rollout followed this experiment.
+
+The next experiment increases the fixed window to **64**, still on one cooperative
+execution thread, and records separate `transaction_batch.prepare` and `.emit`
+stages. The regression now exercises 129 transactions and enforces the 64-operation
+bound. Both binaries and all **3,355 enabled tests passed three repetitions**.
+This larger-window candidate remains **unqualified for fleet rollout** until its
+own sustained-stream and payload checks pass.
 
 ## Recorded live qualification (2026-10-06/07)
 

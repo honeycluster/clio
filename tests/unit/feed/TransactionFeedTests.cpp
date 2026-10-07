@@ -1465,7 +1465,7 @@ TEST_F(FeedTransactionBatchTest, BoundedPreparationPreservesOrderDespiteReverseC
     testFeedPtr->sub(sessionPtr);
     auto const ledger = createLedgerHeader(kLedgerHash, 33);
     std::vector<TransactionAndMetadata> transactions;
-    for (uint32_t i = 0; i < 17; ++i) {
+    for (uint32_t i = 0; i < 129; ++i) {
         TransactionAndMetadata transaction;
         transaction.transaction =
             createCreateOfferTransactionObject(kAccount1, 1, i + 1, kCurrency, kIssuer, 1, 3)
@@ -1485,7 +1485,7 @@ TEST_F(FeedTransactionBatchTest, BoundedPreparationPreservesOrderDespiteReverseC
     std::vector<int> completionOrder;
     std::vector<std::shared_ptr<boost::asio::steady_timer>> waiting;
     EXPECT_CALL(*backend_, doFetchLedgerObject)
-        .Times(17)
+        .Times(129)
         .WillRepeatedly([&](auto const&, auto, boost::asio::yield_context yield)
                            -> std::optional<Blob> {
             auto const index = requested++;
@@ -1494,7 +1494,7 @@ TEST_F(FeedTransactionBatchTest, BoundedPreparationPreservesOrderDespiteReverseC
             // A finite fallback makes a broken concurrency window fail, not hang CI.
             timer->expires_after(std::chrono::seconds{1});
             waiting.push_back(timer);
-            if (waiting.size() == static_cast<std::size_t>(std::min(8, 17 - completed))) {
+            if (waiting.size() == static_cast<std::size_t>(std::min(64, 129 - completed))) {
                 auto release = std::move(waiting);
                 waiting.clear();
                 boost::asio::post(yield.get_executor(), [release = std::move(release)] {
@@ -1512,18 +1512,18 @@ TEST_F(FeedTransactionBatchTest, BoundedPreparationPreservesOrderDespiteReverseC
             return std::nullopt;  // An absent trust line has zero owner funds.
         });
     int emitted = 0;
-    EXPECT_CALL(*mockSessionPtr, apiSubversion).Times(17).WillRepeatedly(testing::Return(1));
-    EXPECT_CALL(*mockSessionPtr, send).Times(17).WillRepeatedly([&](auto const& message) {
+    EXPECT_CALL(*mockSessionPtr, apiSubversion).Times(129).WillRepeatedly(testing::Return(1));
+    EXPECT_CALL(*mockSessionPtr, send).Times(129).WillRepeatedly([&](auto const& message) {
         EXPECT_EQ(active, 0);
         auto const value = boost::json::parse(*message).as_object();
         EXPECT_EQ(value.at("meta").as_object().at("TransactionIndex").as_int64(), emitted++);
         EXPECT_EQ(value.at("transaction").as_object().at("owner_funds").as_string(), "0");
     });
     testFeedPtr->pubBatch(transactions, ledger, backend_, mockAmendmentCenterPtr_, kNetworkId);
-    EXPECT_EQ(peak, 8);
-    EXPECT_EQ(completed, 17);
-    EXPECT_EQ(emitted, 17);
-    ASSERT_EQ(completionOrder.size(), 17);
+    EXPECT_EQ(peak, 64);
+    EXPECT_EQ(completed, 129);
+    EXPECT_EQ(emitted, 129);
+    ASSERT_EQ(completionOrder.size(), 129);
     EXPECT_NE(completionOrder.front(), 0);
 }
 

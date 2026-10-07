@@ -8,6 +8,7 @@
 #include "rpc/RPCHelpers.hpp"
 #include "util/Assert.hpp"
 #include "util/JsonUtils.hpp"
+#include "util/PublicationTiming.hpp"
 #include "util/log/Logger.hpp"
 
 #include <boost/asio/spawn.hpp>
@@ -219,7 +220,8 @@ TransactionFeed::pubBatch(
 {
     // A fixed window bounds coroutine stacks, prepared metadata and in-flight DB
     // requests. All preparation finishes before ordered dispatch of that window.
-    constexpr std::size_t kConcurrency = 8;
+    constexpr std::size_t kConcurrency = 64;
+    util::PublicationTiming timing{logger_, lgrInfo.seq, "transaction_batch"};
     for (std::size_t begin = 0; begin < transactions.size(); begin += kConcurrency) {
         if (!hasSubscribers())
             return;
@@ -241,12 +243,14 @@ TransactionFeed::pubBatch(
             );
         }
         ctx.run();
+        timing.mark("prepare");
         for (std::size_t i = 0; i < chunk.size(); ++i) {
             // Preserve the successful prefix and propagate the earliest input error.
             if (errors[i])
                 std::rethrow_exception(errors[i]);
             publishPrepared(chunk[i], lgrInfo, prepared[i].value(), networkID);
         }
+        timing.mark("emit");
     }
 }
 

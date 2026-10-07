@@ -8,7 +8,7 @@
 #include <optional>
 #include <string_view>
 
-namespace etl::impl {
+namespace util {
 
 /** @brief Opt-in, non-payload publication diagnostics for isolated qualification. */
 class PublicationTiming {
@@ -74,4 +74,4 @@ private:
     Clock::time_point previous_;
 };
 
-}  // namespace etl::impl
+}  // namespace util
