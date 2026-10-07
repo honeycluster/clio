@@ -5,6 +5,11 @@
 [![Clang-tidy checks status](https://github.com/XRPLF/clio/actions/workflows/clang-tidy.yml/badge.svg?branch=develop)](https://github.com/XRPLF/clio/actions/workflows/clang-tidy.yml?query=branch%3Adevelop)
 [![Code coverage develop branch](https://codecov.io/gh/XRPLF/clio/branch/develop/graph/badge.svg?)](https://app.codecov.io/gh/XRPLF/clio)
 
+> **Honeycluster 2.8.0 publication branch:** see the [source changes and verification record](./docs/honeycluster-publication.md)
+> and [open publication-gap investigation](./docs/honeycluster-publication-gap.md).
+> This branch implements the idle-listener optimization, not a complete fix for active-feed pauses.
+> The badges above describe upstream workflows, not qualification of this fork branch.
+
 Clio is an XRP Ledger API server optimized for RPC calls over WebSocket or JSON-RPC.
 It stores validated historical ledger and transaction data in a more space efficient format, and uses up to 4 times less space than [rippled](https://github.com/XRPLF/rippled).
 
